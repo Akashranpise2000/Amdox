@@ -1,0 +1,16 @@
+{
+  "name": "amdox-web-portal",
+  "version": "1.0.0",
+  "description": "MERN Stack Web Portal - Job Listing Portal + Certificate Verification System",
+  "scripts": {
+    "install:all": "npm install && cd backend && npm install && cd ../frontend && npm install",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "server": "cd backend && npm run dev",
+    "client": "cd frontend && npm start",
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && npm start"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}

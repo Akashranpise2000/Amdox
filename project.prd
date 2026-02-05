@@ -1,0 +1,376 @@
+
+PRODUCT REQUIREMENTS DOCUMENT
+
+Web Development Portal
+
+
+MERN Stack  –  Full-Stack Single Application
+Combining  Job Listing Portal  +  Certificate Verification System
+Version 1.0   |   February 2026
+ 
+1.  Project Overview
+This single MERN-stack application merges two core modules into one unified platform: a Job Listing Portal that connects job seekers with employers, and a Certificate Verification System that automates internship-certificate issuance and retrieval. Both modules share the same backend server, the same MongoDB database, the same authentication layer, and the same React frontend — only the pages and routes differ.
+Why one application?
+Shared auth, shared user store, shared deployment. A single login gives a user access to whichever module they need. Ops and hosting costs stay minimal.
+
+1.1  Objectives
+•	Provide employers a full lifecycle for job postings: create, publish, edit, delete, and manage applicants.
+•	Let job seekers search, filter, apply, and track applications in real time.
+•	Allow administrators to bulk-upload student internship data from an Excel file.
+•	Give students a self-serve way to look up, preview, and download their internship certificates as PDFs.
+•	Enforce role-based access so that every action is available only to the correct user type.
+•	Keep the platform secure: hashed passwords, signed tokens, input validation, and rate limiting.
+
+1.2  Technology Stack
+Layer	Technology / Service
+Frontend	React.js 18, React Router v6, Axios, Tailwind CSS
+Backend / API	Node.js 18+, Express.js
+Database	MongoDB via Mongoose ODM  (hosted on Atlas)
+Authentication	bcrypt.js (hashing)  +  JWT (signed tokens)
+Real-Time Notifications	Socket.io
+File Uploads	Multer (in-memory or disk)  +  Cloudinary (resume storage)
+Excel Parsing	SheetJS (xlsx) — server-side
+PDF Generation	PDFKit — server-side, streamed to browser
+Frontend Hosting	Vercel
+Backend Hosting	Railway  /  Render
+Database Hosting	MongoDB Atlas
+
+1.3  User Roles & Permissions
+Role	What they can do
+Admin	Full access: manage users, upload Excel certificates, view all data, moderate listings
+Employer	Create / edit / delete job listings, view & manage incoming applications
+Job Seeker	Build a profile, upload a resume, search & filter jobs, apply, track status
+Student	Search for a certificate by ID, preview it, download as PDF  (no login required)
+Note on Student access
+The certificate-search page is intentionally public — students do not need an account. Every other action in the app is behind JWT-based authentication.
+
+2.  Functional Requirements
+2.1  Module A — Job Listing Portal
+FR-A1  User Registration & Login
+•	Sign-up form collects name, email, password, and role (Employer / Seeker).
+•	Password is hashed with bcrypt before being saved.
+•	Login returns a signed JWT (stored in an httpOnly cookie).
+•	Every protected route runs an authMiddleware that verifies the token and attaches the user object to the request.
+FR-A2  Profile Management
+•	Job Seekers fill in personal info, skills, and work experience.
+•	Resume (PDF) upload goes through Multer then is persisted on Cloudinary; the URL is saved in the database.
+•	Employers add company name, logo, website, and a short description.
+FR-A3  Job Listings  (CRUD)
+•	Employers create a listing supplying: title, description, qualifications, responsibilities, location, salary range, and job type.
+•	Only the employer who created a listing can edit or delete it (enforced server-side).
+•	All active listings are visible to every authenticated user.
+FR-A4  Job Search & Filters
+•	A global search bar accepts a keyword and queries job title + description.
+•	Side-panel filters: Job Type (Full-Time / Part-Time / Contract), Location, Salary Range.
+•	Results refresh without a full page reload as filters change.
+FR-A5  Job Application Flow
+•	An authenticated Seeker can apply to any open listing in one click.
+•	An optional cover-letter text area appears before the final submit.
+•	The system prevents duplicate applications (unique constraint on jobId + seekerId).
+FR-A6  Dashboards
+•	Seeker Dashboard — lists every job the user has applied to together with the current status badge.
+•	Employer Dashboard — shows all posted jobs; clicking a job reveals its applicant list and lets the employer update each status (Pending → Reviewed → Hired / Rejected).
+FR-A7  Real-Time Notifications
+•	When a new application arrives, the relevant employer sees a live toast notification (Socket.io).
+•	When an employer updates an application status, the seeker is notified in real time.
+
+2.2  Module B — Certificate Verification System
+FR-B1  Admin Bulk Upload
+•	Admin uploads an .xlsx file via a drag-and-drop zone.
+•	Server parses it with SheetJS; required columns are Certificate ID, Student Name, Domain, Start Date, End Date.
+•	Validation runs on every row — duplicate IDs and missing fields are flagged and returned in a summary report.
+•	Valid rows are inserted into MongoDB in a single insertMany call.
+FR-B2  Certificate Search  (Public)
+•	A landing page with a single text input lets anyone enter a Certificate ID.
+•	The API looks up the record; if found it redirects to the preview page, otherwise a friendly error is shown.
+•	This endpoint is rate-limited to prevent brute-force scanning.
+FR-B3  Certificate Preview
+•	A styled React component renders the certificate exactly as it will appear when printed.
+•	All fields (student name, domain, start / end dates, certificate ID) are pre-populated from the database.
+FR-B4  Certificate Download  (PDF)
+•	A Download button hits a server endpoint that generates the PDF with PDFKit.
+•	The PDF is streamed back with the correct Content-Type header so the browser saves it immediately.
+•	The generated layout matches the on-screen preview.
+FR-B5  Admin Certificate Dashboard
+•	Paginated table of all certificates with a search bar.
+•	Each row shows an option to soft-delete the record.
+•	An Upload Logs tab lets the admin review every previous bulk import together with any per-row errors.
+
+3.  Non-Functional Requirements
+Area	Target / Constraint
+Performance	All API responses under 300 ms at p95 under normal load
+Security	JWT auth, bcrypt hashing, input validation (Joi), CORS whitelist, rate-limited sensitive routes
+Scalability	Stateless Express backend; Atlas auto-scales the database tier
+Usability	Fully responsive (mobile-first); WCAG AA colour contrast
+Availability	99.5 % uptime SLA; health-check endpoint GET /api/health
+
+4.  Database Schema  (MongoDB Collections)
+4.1  Users
+Central collection — every authenticated person in the platform lives here.
+{
+  _id           : ObjectId,
+  name          : String,
+  email         : String  (unique, indexed),
+  passwordHash  : String  (bcrypt),
+  role          : 'admin' | 'employer' | 'seeker',
+  createdAt     : Date,
+  updatedAt     : Date
+}
+4.2  Profiles
+Extended details for Seekers and Employers. Linked to Users via a one-to-one reference.
+{
+  _id            : ObjectId,
+  userId        : ObjectId  (ref → Users, unique),
+  // ── Seeker fields ──
+  bio            : String,
+  skills         : [String],
+  experience     : [{ title, company, from, to }],
+  resumeURL      : String,   // Cloudinary link
+  // ── Employer fields ──
+  companyName    : String,
+  companyLogo    : String,   // Cloudinary link
+  website        : String,
+  description    : String,
+  // ── shared ──
+  location       : String,
+  phone          : String
+}
+4.3  Jobs
+{
+  _id              : ObjectId,
+  employerId       : ObjectId  (ref → Users),
+  title            : String,
+  description      : String,
+  qualifications   : String,
+  responsibilities : String,
+  location         : String,
+  salaryRange      : { min: Number, max: Number },
+  jobType          : 'full-time' | 'part-time' | 'contract',
+  isActive         : Boolean,
+  createdAt        : Date,
+  updatedAt        : Date
+}
+4.4  Applications
+{
+  _id          : ObjectId,
+  jobId        : ObjectId  (ref → Jobs),
+  seekerId     : ObjectId  (ref → Users),
+  coverLetter  : String,
+  status       : 'pending' | 'reviewed' | 'hired' | 'rejected',
+  createdAt    : Date,
+  updatedAt    : Date
+  // compound index: { jobId, seekerId } unique
+}
+4.5  Certificates
+Stores every internship certificate that has been bulk-imported by an admin.
+{
+  _id            : ObjectId,
+  certificateId  : String   (unique, indexed — used for public search),
+  studentName    : String,
+  domain         : String,  // internship domain / department
+  startDate      : Date,
+  endDate        : Date,
+  isActive       : Boolean, // soft-delete flag
+  uploadedAt     : Date
+}
+4.6  UploadLogs
+Audit trail for every Excel import — lets admin see what succeeded and what failed.
+{
+  _id           : ObjectId,
+  adminId       : ObjectId  (ref → Users),
+  fileName      : String,
+  totalRows     : Number,
+  successRows   : Number,
+  failedRows    : Number,
+  errors        : [{ row: Number, reason: String }],
+  uploadedAt    : Date
+}
+
+5.  API Endpoints
+5.1  Auth (shared)
+Endpoint	Purpose
+POST  /api/auth/register	Create account (name, email, password, role)
+POST  /api/auth/login	Authenticate → set JWT cookie
+POST  /api/auth/logout	Clear the JWT cookie
+5.2  Profiles
+Endpoint	Purpose
+GET   /api/profile/:userId	Fetch a user's profile
+PUT   /api/profile	Update current user's own profile
+POST  /api/profile/resume	Upload resume PDF (seeker)
+5.3  Jobs
+Endpoint	Purpose
+GET   /api/jobs	List active jobs (supports ?keyword, ?type, ?location, ?minSalary, ?maxSalary)
+POST  /api/jobs	Create a listing (employer only)
+PUT   /api/jobs/:id	Edit a listing (owning employer only)
+DELETE /api/jobs/:id	Soft-delete a listing (owning employer only)
+5.4  Applications
+Endpoint	Purpose
+POST  /api/applications	Submit an application (seeker)
+GET   /api/applications/seeker	All applications made by current seeker
+GET   /api/applications/job/:jobId	All applicants for a specific job (employer)
+PUT   /api/applications/:id/status	Update status (employer)
+5.5  Certificates
+Endpoint	Purpose
+POST  /api/certificates/upload	Bulk upload Excel (admin only)
+GET   /api/certificates	Paginated list (admin only)
+GET   /api/certificates/search/:id	Public lookup by Certificate ID
+GET   /api/certificates/:id/pdf	Stream generated PDF (public)
+DELETE /api/certificates/:id	Soft-delete a certificate (admin)
+GET   /api/certificates/logs	View all upload logs (admin)
+5.6  System
+Endpoint	Purpose
+GET  /api/health	Liveness check — returns 200 { status: 'ok' }
+
+6.  Recommended Folder Structure
+web-portal/
+├── frontend/                  ← React app (deployed to Vercel)
+│   ├── public/
+│   └── src/
+│       ├── components/       ← reusable UI pieces
+│       ├── pages/
+│       │   ├── Home.jsx
+│       │   ├── Login.jsx  /  Register.jsx
+│       │   ├── JobSearch.jsx  /  JobDetail.jsx
+│       │   ├── SeekDashboard.jsx
+│       │   ├── EmpDashboard.jsx
+│       │   ├── CertSearch.jsx  /  CertPreview.jsx
+│       │   └── AdminDashboard.jsx
+│       ├── context/          ← AuthContext (global user state)
+│       ├── hooks/            ← useAuth, useJobs, useCert …
+│       ├── api/              ← Axios service layer (jobs.js, certs.js …)
+│       ├── utils/            ← helpers, validators
+│       └── App.jsx           ← Router setup
+├── backend/                  ← Express server (deployed to Railway)
+│   ├── src/
+│   │   ├── routes/           ← auth, jobs, applications, certificates
+│   │   ├── controllers/      ← business logic per module
+│   │   ├── models/           ← Mongoose schemas (User, Profile, Job …)
+│   │   ├── middleware/       ← authMiddleware, rateLimiter, errorHandler
+│   │   ├── sockets/          ← Socket.io event handlers
+│   │   ├── utils/            ← Cloudinary helper, PDF builder, Excel parser
+│   │   └── server.js         ← Express + Socket.io bootstrap
+│   ├── .env
+│   └── package.json
+└── README.md
+
+7.  Step-by-Step Implementation Plan
+The build is split into 10 sequential phases. Each phase has clear entry and exit criteria so the team (or solo developer) can verify completeness before moving on.
+Phase	Focus	Est. Time
+Phase 1	Project scaffold, env config, Atlas connection, base routes	3–4 days
+Phase 2	User model, registration, login, JWT middleware	3 days
+Phase 3	Profile model & CRUD, resume upload via Cloudinary	3–4 days
+Phase 4	Job model, listing CRUD APIs, employer-only guards	3 days
+Phase 5	Job-search page: keyword query, filters, responsive card grid	3–4 days
+Phase 6	Application flow: submit, view, status-update APIs + UI	4 days
+Phase 7	Certificate module: upload, search, preview, PDF download	5–6 days
+Phase 8	Dashboards: Seeker, Employer, Admin	4 days
+Phase 9	Socket.io real-time notifications + upload-log viewer	3 days
+Phase 10	Testing, deployment, smoke tests	4–5 days
+
+7.1  Phase 1 — Project Scaffold
+Set up both frontend and backend from scratch, confirm the database connection works, and define the shared environment.
+# Frontend
+npx create-react-app frontend
+cd frontend && npm install react-router-dom axios tailwindcss
+
+# Backend
+mkdir backend && cd backend && npm init -y
+npm install express mongoose dotenv cors jsonwebtoken bcryptjs
+npm install multer cloudinary xlsx pdfkit socket.io
+npm install --save-dev nodemon jest supertest
+•	Create .env with MONGO_URI (Atlas), JWT_SECRET, CLOUDINARY_NAME / KEY / SECRET, PORT.
+•	Write server.js: initialise Express, connect Mongoose, mount a /api/health route, start Socket.io.
+•	Exit-criteria: npm start spins up both apps; GET /api/health returns 200.
+7.2  Phase 2 — Authentication
+•	Create the User Mongoose schema (name, email, passwordHash, role).
+•	POST /api/auth/register — validate input with Joi, hash with bcrypt, save, return a signed JWT in an httpOnly cookie.
+•	POST /api/auth/login  — compare password, sign token, set cookie.
+•	authMiddleware.js — reads the cookie, verifies the JWT, attaches req.user.
+•	Build the React Login and Register pages; on success redirect to the role-appropriate dashboard.
+•	Exit-criteria: a new user can register, log out, log back in, and the correct dashboard loads.
+7.3  Phase 3 — Profiles
+•	Create Profile schema (linked to User via userId).
+•	Seeker route: PUT /api/profile — accepts bio, skills, experience.
+•	Resume upload: POST /api/profile/resume — Multer reads the file into memory, streams it to Cloudinary, saves the URL.
+•	Employer route: same PUT endpoint but populates company fields.
+•	Build the React profile-edit form with conditional sections based on role.
+•	Exit-criteria: both role types can create and update their profiles; seeker sees their resume link.
+7.4  Phase 4 — Job Listings
+•	Create Job schema (employerId ref, title, description, qualifications, responsibilities, location, salaryRange, jobType, isActive).
+•	POST /api/jobs — guard with role === 'employer'; attach employerId from the token.
+•	PUT / DELETE — verify req.user._id === job.employerId before allowing the operation.
+•	Build the employer posting form in React.
+•	Exit-criteria: employer can create, update, and soft-delete a listing; listing appears in a basic list.
+7.5  Phase 5 — Job Search & Filters
+•	Server-side: GET /api/jobs accepts query params — keyword (regex on title + description), type, location, minSalary, maxSalary. Chain into a single MongoDB query.
+•	Frontend: build a search bar + a collapsible filter sidebar. Fire the API call on every filter change (debounced at 400 ms).
+•	Display results as responsive cards showing title, company, location, salary, and an Apply button.
+•	Exit-criteria: typing a keyword or toggling a filter instantly narrows the visible listings.
+7.6  Phase 6 — Applications
+•	Create Application schema with a compound unique index on { jobId, seekerId }.
+•	POST /api/applications — guard: role === 'seeker' and no prior application for this job.
+•	GET endpoints let each side see only their own data.
+•	PUT /api/applications/:id/status — employer updates status through allowed transitions.
+•	React: add a one-click Apply button on each card; show a cover-letter modal before submit.
+•	Exit-criteria: seeker applies, employer sees the application, employer updates status.
+7.7  Phase 7 — Certificate Module
+•	Create Certificate and UploadLogs schemas.
+•	POST /api/certificates/upload — Multer (memoryStorage) → SheetJS parses the buffer → validate rows → insertMany valid rows → return summary { total, success, failed, errors }.
+•	GET /api/certificates/search/:id — public, no auth; returns certificate data or 404.
+•	GET /api/certificates/:id/pdf — PDFKit builds the certificate document and pipes it to the response with Content-Type: application/pdf.
+•	React: CertSearch page (public), CertPreview page (renders the styled certificate + Download button).
+•	Exit-criteria: admin uploads an Excel file, a student finds their cert by ID, previews it, and downloads a matching PDF.
+7.8  Phase 8 — Dashboards
+•	Seeker Dashboard: fetch /api/applications/seeker, render a table with status badges and links back to the original job.
+•	Employer Dashboard: list the employer's jobs; click a job to see its applicant table; inline status-update dropdown.
+•	Admin Dashboard: two tabs — Certificates (paginated table + search + delete) and Upload Logs (list of imports with expandable error details).
+•	Exit-criteria: every role lands on a dashboard that shows only their own data and lets them act on it.
+7.9  Phase 9 — Real-Time & Logs
+•	Socket.io: on the server, after a new application is saved, emit 'newApplication' to the employer's socket room.
+•	Client-side: connect to the server on mount; listen for 'newApplication' and 'statusUpdate' events; show a toast notification.
+•	Wire the upload-log viewer into the Admin Dashboard so import history is browsable.
+•	Exit-criteria: employer sees a live toast when a seeker applies; seeker sees one when the employer updates status.
+7.10  Phase 10 — Testing & Deployment
+•	Unit tests (Jest + Supertest) for every route: auth, jobs, applications, certificates.
+•	Integration test: full flow from register → post job → apply → update status → receive notification.
+•	Integration test: admin upload → student search → preview → PDF download.
+•	Cross-browser QA: Chrome, Firefox, Safari, and a mobile device.
+•	Deploy frontend to Vercel; set REACT_APP_API_URL.
+•	Deploy backend to Railway / Render; set all .env variables.
+•	Point MONGO_URI at Atlas; whitelist the backend IP.
+•	Run smoke tests against production URLs; confirm health-check.
+•	Exit-criteria: all tests green, both modules work end-to-end on production URLs.
+
+8.  Security & Best Practices
+•	Never commit .env — add it to .gitignore on day one.
+•	JWTs live in httpOnly cookies, not localStorage, to block XSS token theft.
+•	Every mutation endpoint validates input with Joi before touching the database.
+•	CORS is restricted to the frontend origin in production.
+•	The certificate-search endpoint is rate-limited (e.g. 20 req / min per IP) to prevent enumeration.
+•	Soft-deletes (isActive flag) keep audit trails intact; hard deletes are admin-only and logged.
+
+9.  Environment Variables Reference
+# ── shared ──────────────────────
+MONGO_URI=mongodb+srv://…          # Atlas connection string
+JWT_SECRET=<random-long-string>
+PORT=5000
+
+# ── Cloudinary (resume uploads) ─
+CLOUDINARY_NAME=…
+CLOUDINARY_API_KEY=…
+CLOUDINARY_API_SECRET=…
+
+# ── Frontend ─────────────────────
+REACT_APP_API_URL=http://localhost:5000/api
+REACT_APP_SOCKET_URL=http://localhost:5000
+
+10.  Deployment Checklist
+1.	Vercel project created – Frontend repo linked; REACT_APP_* env vars configured.
+2.	Railway / Render service created – Backend repo linked; all .env vars pasted into the service.
+3.	MongoDB Atlas cluster ready – Database user created; backend IP whitelisted; Network Access configured.
+4.	Cloudinary account set up – Free-tier plan is sufficient for a prototype.
+5.	HTTPS verified – Both Vercel and Railway provide TLS out of the box.
+6.	Health-check passing – GET /api/health returns 200 in production.
+7.	Smoke tests run – Register → apply flow and upload → search → download flow both pass.
+8.	Logging enabled – Railway / Render log streams are monitored for errors.
+
